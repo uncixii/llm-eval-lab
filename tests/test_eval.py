@@ -1,5 +1,5 @@
-from llm_eval_lab.models import EvalCase
 from llm_eval_lab.judge import LLMAsJudge
+from llm_eval_lab.models import EvalCase
 from llm_eval_lab.regression import compare_reports, evaluate_dataset
 from llm_eval_lab.rubric import default_rubric
 
@@ -32,7 +32,7 @@ def test_llm_judge_retries_invalid_structured_output() -> None:
             self.references.append(reference)
             self.validation_errors.append(validation_errors)
             if self.calls == 1:
-                return {"relevance": {"score": 2.0, "reason": "invalid"}}
+                return {"reference_overlap": {"score": 2.0, "reason": "invalid"}}
             return {
                 criterion.name: {"score": 0.8, "reason": "structured"}
                 for criterion in rubric.criteria

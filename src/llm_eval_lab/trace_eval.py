@@ -11,43 +11,54 @@ from .models import (
     AgentEvalReport,
     AgentRunEvalResult,
     CapturedRun,
+    EvaluationContext,
     StructuredCheck,
     TraceEvent,
 )
+from .validation import fingerprint, number, unique_ids
 
 
 class RunRubricJudge(Protocol):
-    def grade(self, run: CapturedRun, case: AgentEvalCase) -> tuple[StructuredCheck, ...]: ...
+    @property
+    def configuration(self) -> dict: ...
+
+    def grade(
+        self, run: CapturedRun, case: AgentEvalCase
+    ) -> tuple[StructuredCheck, ...]: ...
 
 
 class HeuristicRunRubricJudge:
-    """本地 deterministic substitute；生产环境可替换为 structured LLM judge。"""
+    """Lexical diagnostics only. Semantic criteria remain unknown without a judge."""
 
-    def grade(self, run: CapturedRun, case: AgentEvalCase) -> tuple[StructuredCheck, ...]:
-        relevance = token_coverage(run.output, case.reference) if case.reference else float(bool(run.output))
-        has_evidence = bool(run.artifacts) and bool(run.output.strip())
-        return (
+    configuration = {"kind": "lexical-diagnostic", "version": 2}
+
+    def grade(
+        self, run: CapturedRun, case: AgentEvalCase
+    ) -> tuple[StructuredCheck, ...]:
+        checks = [
             StructuredCheck(
-                "output_relevance",
-                "quality",
-                relevance >= 0.5,
-                relevance,
-                f"reference token coverage={relevance:.3f}",
-                source="rubric",
-                weight=1.5,
-                must_pass=True,
-            ),
+                "reference_overlap",
+                "diagnostic",
+                None,
+                None,
+                f"token coverage={token_coverage(run.output, case.reference):.3f}; not a correctness verdict",
+                weight=0,
+            )
+        ]
+        checks.extend(
             StructuredCheck(
-                "artifact_grounding",
+                c.check_id,
                 "quality",
-                has_evidence,
-                float(has_evidence),
-                "输出应有 captured artifact 支撑。",
+                None,
+                None,
+                "Semantic evaluation requires a configured judge or human review.",
                 source="rubric",
-                weight=1.5,
-                must_pass=True,
-            ),
+                weight=c.weight,
+                must_pass=c.must_pass,
+            )
+            for c in case.rubric
         )
+        return tuple(checks)
 
 
 def _artifact_present(value: object) -> bool:
@@ -61,14 +72,20 @@ def _artifact_present(value: object) -> bool:
 
 
 def parse_trace_jsonl(lines: str | Iterable[str]) -> tuple[TraceEvent, ...]:
-    source = lines.splitlines() if isinstance(lines, str) else lines
+    """Read normalized trace JSONL; never silently discard malformed events."""
     events = []
-    for line in source:
+    for lineno, line in enumerate(
+        lines.splitlines() if isinstance(lines, str) else lines, 1
+    ):
         if not line.strip():
             continue
-        payload = json.loads(line)
-        if "event_type" in payload or "type" in payload:
+        try:
+            payload = json.loads(line)
+            if not isinstance(payload, dict):
+                raise ValueError("event must be an object")
             events.append(TraceEvent.from_dict(payload))
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"trace line {lineno}: {exc}") from exc
     return tuple(events)
 
 
@@ -80,69 +97,315 @@ def _ordered_subsequence(actual: list[str], expected: tuple[str, ...]) -> bool:
     return position == len(expected)
 
 
+def validate_checks(checks: tuple[StructuredCheck, ...]) -> None:
+    unique_ids((c.check_id for c in checks), "check ids")
+    for c in checks:
+        if c.category not in {
+            "outcome",
+            "process",
+            "quality",
+            "efficiency",
+            "risk",
+            "diagnostic",
+        }:
+            raise ValueError(f"invalid category: {c.category}")
+        if c.source not in {"deterministic", "rubric", "llm", "human"}:
+            raise ValueError(f"invalid source: {c.source}")
+        number(c.weight, "check weight")
+        if c.category == "diagnostic" and (c.weight != 0 or c.must_pass):
+            raise ValueError("diagnostics cannot affect scores or gates")
+        if type(c.must_pass) is not bool or (c.must_pass and c.weight == 0):
+            raise ValueError("must-pass checks need positive weights")
+        if c.passed is None:
+            if c.score is not None:
+                raise ValueError("unknown checks must have null scores")
+        elif type(c.passed) is not bool:
+            raise ValueError("check pass must be bool or null")
+        else:
+            number(c.score, "check score", maximum=1)
+        if not isinstance(c.notes, str) or not c.notes.strip():
+            raise ValueError("checks require explanatory notes")
+        if not all(isinstance(e, str) and e for e in c.evidence):
+            raise ValueError("invalid evidence references")
+
+
+def _validate_case(case: AgentEvalCase) -> None:
+    unique_ids([case.case_id], "case ids")
+    if not case.prompt.strip():
+        raise ValueError("case prompt must be nonempty")
+    e = case.expectation
+    for name in ("max_tool_calls", "max_total_tokens"):
+        value = getattr(e, name)
+        if value is not None and (type(value) is not int or value < 0):
+            raise ValueError(f"{name} must be a nonnegative integer")
+    for needed, forbidden in (
+        (e.required_tools, e.forbidden_tools),
+        (e.required_skills, e.forbidden_skills),
+    ):
+        if set(needed) & set(forbidden):
+            raise ValueError("required and forbidden behavior overlaps")
+    if case.rubric:
+        unique_ids((c.check_id for c in case.rubric), "rubric ids")
+    for c in case.rubric:
+        number(c.weight, "rubric weight")
+        if c.weight <= 0 or not c.description.strip() or type(c.must_pass) is not bool:
+            raise ValueError("invalid binary rubric")
+    if (
+        not case.accepted_outputs
+        and not case.rubric
+        and not (e.required_artifacts or e.artifact_values)
+    ):
+        raise ValueError("define an output, artifact or semantic success criterion")
+    if any(not isinstance(v, str) or not v.strip() for v in case.accepted_outputs):
+        raise ValueError("accepted outputs must be nonempty strings")
+
+
 def evaluate_captured_run(
     run: CapturedRun,
     case: AgentEvalCase,
     rubric_judge: RunRubricJudge | None = None,
 ) -> AgentRunEvalResult:
+    _validate_case(case)
+    if run.prompt != case.prompt:
+        raise ValueError("captured prompt differs from case prompt")
+    if not run.run_id.strip() or not isinstance(run.output, str):
+        raise ValueError("invalid captured run")
+    if run.status not in {"completed", "failed", "cancelled", "timeout"}:
+        raise ValueError("unknown run status")
+    for event in run.trace:
+        TraceEvent.from_dict(asdict(event))
+    for value in run.usage.values():
+        if type(value) is not int or value < 0:
+            raise ValueError("usage must contain nonnegative integers")
     event_types = [event.event_type for event in run.trace]
     sequences = [event.sequence for event in run.trace]
-    sequence_ok = (
-        bool(sequences)
-        and sequences == sorted(sequences)
-        and len(sequences) == len(set(sequences))
+    e = case.expectation
+    checks: list[StructuredCheck] = []
+
+    def add(cid, category, passed, notes, weight=1.0, must_pass=True, evidence=()):
+        checks.append(
+            StructuredCheck(
+                cid,
+                category,
+                passed,
+                None if passed is None else float(passed),
+                notes,
+                weight=weight,
+                must_pass=must_pass,
+                evidence=tuple(evidence),
+            )
+        )
+
+    add(
+        "outcome_success",
+        "outcome",
+        run.status == "completed",
+        f"status={run.status}",
+        2,
+        evidence=("status",),
     )
-    expectation = case.expectation
-    event_order_ok = _ordered_subsequence(event_types, expectation.required_event_order)
-    artifacts_ok = all(
-        name in run.artifacts and _artifact_present(run.artifacts[name])
-        for name in expectation.required_artifacts
+    add(
+        "trace_order",
+        "process",
+        _ordered_subsequence(event_types, e.required_event_order),
+        f"required subsequence={e.required_event_order}",
+        2,
+        evidence=tuple(f"trace:{s}" for s in sequences),
     )
-    no_error = not any(event_type.endswith(".failed") for event_type in event_types)
-    tool_calls = sum(event_type == "tool.started" for event_type in event_types)
-    tool_efficiency = expectation.max_tool_calls is None or tool_calls <= expectation.max_tool_calls
-    total_tokens = int(run.usage.get("total_tokens", 0))
-    token_efficiency = expectation.max_total_tokens is None or total_tokens <= expectation.max_total_tokens
-    checks = (
-        StructuredCheck("outcome_success", "outcome", run.status == "completed", float(run.status == "completed"), f"status={run.status}", weight=2.0, must_pass=True),
-        StructuredCheck("trace_order", "process", event_order_ok, float(event_order_ok), "required events 应按顺序出现。", weight=2.0, must_pass=True),
-        StructuredCheck("trace_sequence", "process", sequence_ok, float(sequence_ok), "sequence 必须严格递增且不可重复。", weight=1.5, must_pass=True),
-        StructuredCheck("required_artifacts", "outcome", artifacts_ok, float(artifacts_ok), f"required={expectation.required_artifacts}", weight=1.5, must_pass=True),
-        StructuredCheck("no_failed_event", "process", no_error, float(no_error), "trace 中不应出现 failed event。", weight=1.5, must_pass=True),
-        StructuredCheck("tool_efficiency", "efficiency", tool_efficiency, 1.0 if tool_efficiency else expectation.max_tool_calls / max(tool_calls, 1), f"tool_calls={tool_calls}", weight=1.0),
-        StructuredCheck("token_efficiency", "efficiency", token_efficiency, 1.0 if token_efficiency else expectation.max_total_tokens / max(total_tokens, 1), f"total_tokens={total_tokens}", weight=1.0),
-    ) + (rubric_judge or HeuristicRunRubricJudge()).grade(run, case)
-    total_weight = sum(check.weight for check in checks) or 1.0
-    score = 100.0 * sum(check.score * check.weight for check in checks) / total_weight
-    overall_pass = all(check.passed for check in checks if check.must_pass)
-    return AgentRunEvalResult(case.case_id, overall_pass, round(score, 2), checks)
+    add(
+        "trace_sequence",
+        "process",
+        bool(sequences) and sequences == sorted(set(sequences)),
+        "Sequence must be nonempty, strictly increasing and unique; gaps are permitted.",
+        1.5,
+    )
+    add(
+        "required_artifacts",
+        "outcome",
+        all(
+            k in run.artifacts and _artifact_present(run.artifacts[k])
+            for k in e.required_artifacts
+        ),
+        f"required={e.required_artifacts}",
+        1.5,
+        evidence=tuple(
+            f"artifact:{k}" for k in e.required_artifacts if k in run.artifacts
+        ),
+    )
+    add(
+        "no_failed_event",
+        "process",
+        not any(t.endswith(".failed") for t in event_types),
+        "Strict policy: failed events require review even if the run recovered.",
+        1.5,
+    )
+    if e.artifact_values:
+        add(
+            "artifact_values",
+            "outcome",
+            all(
+                k in run.artifacts and run.artifacts[k] == v
+                for k, v in e.artifact_values.items()
+            ),
+            "Captured final-state values must match the declared contract.",
+            evidence=tuple(
+                f"artifact:{k}" for k in e.artifact_values if k in run.artifacts
+            ),
+        )
+    if case.accepted_outputs:
+        add(
+            "output_contract",
+            "outcome",
+            run.output.strip() in case.accepted_outputs,
+            "Exact output contract; paraphrases need a semantic rubric.",
+            evidence=("output",),
+        )
+    for kind, event_type, key, required, forbidden in (
+        ("tool", "tool.started", "tool", e.required_tools, e.forbidden_tools),
+        ("skill", "skill.invoked", "skill", e.required_skills, e.forbidden_skills),
+    ):
+        events = [event for event in run.trace if event.event_type == event_type]
+        names = [event.payload.get(key) for event in events]
+        known = all(isinstance(name, str) and bool(name.strip()) for name in names)
+        evidence = tuple(f"trace:{event.sequence}" for event in events)
+        if required:
+            verdict = (
+                True
+                if all(name in names for name in required)
+                else (False if known else None)
+            )
+            add(
+                f"required_{kind}s",
+                "process",
+                verdict,
+                f"required={required}; observed={names}",
+                evidence=evidence,
+            )
+        if forbidden:
+            verdict = (
+                False
+                if any(name in forbidden for name in names)
+                else (True if known else None)
+            )
+            add(
+                f"forbidden_{kind}s",
+                "risk",
+                verdict,
+                f"forbidden={forbidden}; observed={names}",
+                evidence=evidence,
+            )
+    if e.max_tool_calls is not None:
+        calls = event_types.count("tool.started")
+        add(
+            "tool_efficiency",
+            "efficiency",
+            calls <= e.max_tool_calls,
+            f"tool_calls={calls}; budget={e.max_tool_calls}",
+            must_pass=False,
+        )
+    if e.max_total_tokens is not None:
+        tokens = run.usage.get("total_tokens")
+        add(
+            "token_efficiency",
+            "efficiency",
+            None if tokens is None else tokens <= e.max_total_tokens,
+            f"total_tokens={tokens}; budget={e.max_total_tokens}; missing usage is unknown",
+            must_pass=False,
+        )
+    quality = (rubric_judge or HeuristicRunRubricJudge()).grade(run, case)
+    # A plugin may add diagnostics, but cannot omit or weaken the declared rubric.
+    for criterion in case.rubric:
+        matches = [c for c in quality if c.check_id == criterion.check_id]
+        if len(matches) != 1 or (
+            matches[0].must_pass,
+            matches[0].weight,
+            matches[0].category,
+        ) != (criterion.must_pass, criterion.weight, "quality"):
+            raise ValueError(f"judge violated rubric contract: {criterion.check_id}")
+    checks.extend(quality)
+    validate_checks(tuple(checks))
+    total_weight = sum(c.weight for c in checks)
+    score = 100 * sum((c.score or 0) * c.weight for c in checks) / total_weight
+    passed = all(c.passed is True for c in checks if c.must_pass)
+    return AgentRunEvalResult(
+        case.case_id, passed, round(score, 2), tuple(checks), run.run_id
+    )
+
+
+def _metrics(results: tuple[AgentRunEvalResult, ...]) -> dict[str, float]:
+    unique_ids((r.case_id for r in results), "case ids")
+    values: dict[str, list[StructuredCheck]] = {}
+    for result in results:
+        validate_checks(result.checks)
+        weight = sum(c.weight for c in result.checks)
+        if weight <= 0:
+            raise ValueError("report has no scored checks")
+        expected_score = round(
+            100 * sum((c.score or 0) * c.weight for c in result.checks) / weight, 2
+        )
+        expected_pass = all(c.passed is True for c in result.checks if c.must_pass)
+        if (
+            type(result.overall_pass) is not bool
+            or result.overall_pass != expected_pass
+            or result.score != expected_score
+        ):
+            raise ValueError("result summary does not match checks")
+        for c in result.checks:
+            if c.category != "diagnostic":
+                values.setdefault(c.check_id, []).append(c)
+    metrics = {}
+    for name, checks in values.items():
+        metrics[f"check/{name}"] = sum(c.score or 0 for c in checks) / len(checks)
+        metrics[f"unknown/{name}"] = sum(c.passed is None for c in checks) / len(checks)
+        metrics[f"applicable/{name}"] = float(len(checks))
+    scored = [c for r in results for c in r.checks if c.category != "diagnostic"]
+    metrics["overall_score"] = sum(r.score for r in results) / len(results)
+    metrics["pass_rate"] = sum(r.overall_pass for r in results) / len(results)
+    metrics["unknown_rate"] = sum(c.passed is None for c in scored) / len(scored)
+    return dict(sorted(metrics.items()))
 
 
 def evaluate_agent_runs(
     runs: dict[str, CapturedRun],
     cases: list[AgentEvalCase],
     rubric_judge: RunRubricJudge | None = None,
+    *,
+    context: EvaluationContext | None = None,
+    subject: dict[str, str] | None = None,
 ) -> AgentEvalReport:
-    missing = [case.case_id for case in cases if case.case_id not in runs]
-    if missing:
-        raise ValueError(f"缺少 captured runs: {missing}")
-    results = tuple(
-        evaluate_captured_run(runs[case.case_id], case, rubric_judge)
-        for case in cases
+    unique_ids((c.case_id for c in cases), "case ids")
+    if set(runs) != {c.case_id for c in cases}:
+        raise ValueError(
+            "captured runs must match case ids exactly (missing or extra runs)"
+        )
+    unique_ids((run.run_id for run in runs.values()), "run ids")
+    judge = rubric_judge or HeuristicRunRubricJudge()
+    config = judge.configuration
+    if not isinstance(config, dict) or not config:
+        raise ValueError(
+            "judge configuration must identify its implementation, model and settings"
+        )
+    context = context or EvaluationContext()
+    if not context.environment.strip() or context.protocol != "agent-eval-v2":
+        raise ValueError("invalid environment or evaluation protocol")
+    manifest = json.loads(
+        json.dumps(
+            {
+                "cases": [asdict(c) for c in sorted(cases, key=lambda c: c.case_id)],
+                "context": asdict(context),
+                "judge": config,
+            },
+            allow_nan=False,
+        )
     )
-    if not results:
-        return AgentEvalReport((), {})
-    check_ids = {check.check_id for result in results for check in result.checks}
-    metrics = {
-        check_id: sum(
-            next(check.score for check in result.checks if check.check_id == check_id)
-            for result in results
-        ) / len(results)
-        for check_id in check_ids
-    }
-    metrics["overall_score"] = sum(result.score for result in results) / len(results)
-    metrics["pass_rate"] = sum(result.overall_pass for result in results) / len(results)
-    return AgentEvalReport(results, dict(sorted(metrics.items())))
+    identity = fingerprint(manifest)
+    results = tuple(
+        evaluate_captured_run(runs[c.case_id], c, judge)
+        for c in sorted(cases, key=lambda c: c.case_id)
+    )
+    return AgentEvalReport(
+        results, _metrics(results), identity, dict(subject or {}), manifest
+    )
 
 
 def compare_agent_eval_reports(
@@ -152,39 +415,89 @@ def compare_agent_eval_reports(
     max_metric_drops: dict[str, float] | None = None,
     minimum_metrics: dict[str, float] | None = None,
 ) -> AgentEvalRegressionReport:
-    baseline_ids = {result.case_id for result in baseline.results}
-    candidate_ids = {result.case_id for result in candidate.results}
-    if baseline_ids != candidate_ids:
+    number(max_overall_drop, "max_overall_drop", maximum=100)
+    for report in (baseline, candidate):
+        unique_ids((r.case_id for r in report.results), "case ids")
+        if (
+            not report.evaluation_manifest
+            or fingerprint(report.evaluation_manifest) != report.evaluation_fingerprint
+        ):
+            raise ValueError("evaluation manifest is missing or altered")
+        if _metrics(report.results) != report.metrics:
+            raise ValueError("report metrics do not match checks")
+    if {r.case_id for r in baseline.results} != {r.case_id for r in candidate.results}:
         raise ValueError("baseline 与 candidate 必须使用相同 case_id 集合")
-    names = baseline.metrics.keys() | candidate.metrics.keys()
-    deltas = {
-        name: candidate.metrics.get(name, 0.0) - baseline.metrics.get(name, 0.0)
-        for name in names
-    }
-    passed = deltas.get("overall_score", 0.0) >= -max_overall_drop
-    for name, allowed_drop in (max_metric_drops or {}).items():
-        passed = passed and deltas.get(name, 0.0) >= -allowed_drop
+    if (
+        not baseline.evaluation_fingerprint
+        or baseline.evaluation_fingerprint != candidate.evaluation_fingerprint
+    ):
+        raise ValueError(
+            "evaluation conditions differ: cases, rubric, judge or environment"
+        )
+    for left, right in zip(
+        sorted(baseline.results, key=lambda r: r.case_id),
+        sorted(candidate.results, key=lambda r: r.case_id),
+    ):
+
+        def shape(result):
+            return sorted(
+                (c.check_id, c.category, c.weight, c.must_pass, c.source)
+                for c in result.checks
+            )
+
+        if shape(left) != shape(right):
+            raise ValueError("judge check contracts differ between runs")
+    names = baseline.metrics.keys()
+    if names != candidate.metrics.keys():
+        raise ValueError("metric sets differ")
+    deltas = {n: candidate.metrics[n] - baseline.metrics[n] for n in names}
+    reasons = []
+    for result in candidate.results:
+        for c in result.checks:
+            if c.must_pass and c.passed is not True:
+                reasons.append(f"{result.case_id}/{c.check_id}: {c.verdict}")
+    if deltas["overall_score"] < -max_overall_drop:
+        reasons.append("overall_score dropped beyond tolerance")
+    for name, limit in (max_metric_drops or {}).items():
+        number(limit, f"drop limit {name}")
+        if (
+            name not in names
+            or name.startswith(("unknown/", "applicable/"))
+            or name == "unknown_rate"
+        ):
+            raise ValueError(f"unknown or non-higher-is-better metric: {name}")
+        if deltas[name] < -limit:
+            reasons.append(f"{name}: regression exceeds {limit}")
     for name, floor in (minimum_metrics or {}).items():
-        passed = passed and candidate.metrics.get(name, 0.0) >= floor
+        number(floor, f"minimum {name}")
+        if (
+            name not in names
+            or name.startswith(("unknown/", "applicable/"))
+            or name == "unknown_rate"
+        ):
+            raise ValueError(f"unknown or non-higher-is-better metric: {name}")
+        if candidate.metrics[name] < floor:
+            reasons.append(f"{name}: below minimum {floor}")
     return AgentEvalRegressionReport(
-        baseline,
-        candidate,
-        dict(sorted(deltas.items())),
-        passed,
+        baseline, candidate, dict(sorted(deltas.items())), not reasons, tuple(reasons)
     )
 
 
 def result_as_structured_json(result: AgentRunEvalResult) -> str:
     payload = asdict(result)
+    payload["schema_version"] = 2
     payload["checks"] = [
-        {
-            "id": check["check_id"],
-            "category": check["category"],
-            "pass": check["passed"],
-            "score": check["score"],
-            "notes": check["notes"],
-            "source": check["source"],
-        }
-        for check in payload["checks"]
+        dict(
+            id=c.check_id,
+            category=c.category,
+            verdict=c.verdict,
+            score=c.score,
+            notes=c.notes,
+            source=c.source,
+            weight=c.weight,
+            must_pass=c.must_pass,
+            evidence=list(c.evidence),
+        )
+        for c in result.checks
     ]
-    return json.dumps(payload, ensure_ascii=False, indent=2)
+    return json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False)

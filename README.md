@@ -1,86 +1,59 @@
 # llm-eval-lab
 
-面向 LLM/Agent 应用的 structured evaluation、trace grading 与 regression testing reference implementation。
+这是面向 LLM / Agent 应用的独立评测参考实现。过往商业项目的代码、数据和内部资产属于相关公司；本项目基于通用工程问题与公开资料重新实现，示例均为明确标注的合成案例，不代表历史生产效果。
+
+项目关注一个具体问题：修改 Prompt、Skill 或工具策略之后，怎样知道任务真的变好了，以及退化发生在哪里？
+
+## 从任务约定出发
+
+回答包含参考答案里的词，不代表回答正确；Agent 说“已完成”，不代表目标状态已经改变；总分提高，也可能掩盖一次不该发生的工具调用。只比较最终文本或平均分，很难据此决定是否接受一次修改。
+
+这里把任务表示为输入、预期行为和可检查的结果约定。执行由外部 Agent 完成，评测器接收规范化的 trace、最终输出、产物与 usage，分别判断任务结果、执行过程、输出质量、资源效率和禁止行为。它不执行被评测内容中的指令，也不把一种固定工具路径当成所有任务的唯一正确解：事件顺序采用关键步骤子序列，具体工具与 Skill 则按任务约定核对名称。
 
 ```text
-Prompt / Eval Case
-        ↓
-Captured Run
-  ├── ordered trace events
-  ├── final output
-  ├── artifacts
-  └── token/tool usage
-        ↓
-Deterministic Checks
-        ↓
-Rubric-based Structured Grading
-        ↓
-Per-check Metrics
-        ↓
-Baseline vs Candidate Regression Gate
+Task contract + captured run
+              │
+      Deterministic checks
+      output / final state / behavior
+              │
+      Binary rubric + evidence
+      pass / fail / unknown
+              │
+      Per-case checks + experiment manifest
+              │
+      Hard requirements → metric tolerances
+              │
+      Accept / reject with reasons
 ```
 
-这里不是只评最终回答。Agent 即使给出了看似正确的答案，也可能选错 tool、走错顺序、发生多余循环，或消耗不必要的 tokens；这些过程问题需要通过 trace 才能定位。
+## 把可验证事实与语义判断分开
 
-## 核心能力
+能通过代码确认的事实直接检查，例如产物值、关键事件顺序、必需工具和禁止调用的 Skill。负例同样属于任务约定：用户只要求查看已有状态时，主动调用创建或发送工具可能就是失败。
 
-- `CapturedRun` / `TraceEvent`：统一保存 prompt、output、ordered trace、artifacts 和 usage。
-- `TraceExpectation`：声明 required event order、required artifacts、最大 tool calls 和 token budget。
-- `deterministic checks`：检查 outcome、event order、sequence 完整性、failed event、非空 artifact、tool-call 与 token efficiency。
-- `Rubric`：把 relevance、groundedness、format 等定性标准结构化并显式配置权重。
-- `HeuristicJudge` / `HeuristicRunRubricJudge`：提供零依赖、可重复 baseline。
-- `LLMAsJudge` / `RunRubricJudge`：保留 LLM-as-a-Judge adapter；judge 同时接收 prompt、response、reference 和 rubric，格式错误重试时会收到 validation error。
-- `evaluate_agent_runs`：输出逐 case checks 以及 outcome/process/quality/efficiency 指标。
-- `compare_agent_eval_reports`：比较 baseline/candidate，支持 overall、关键 metric 最大退化值和最低分门槛。
-- `ResilientModelGateway`：统一 completion provider 接口，支持 timeout、指数 backoff、provider 内重试、跨 provider fallback、attempt trace、latency、token usage 和成本估算。
-- `LiteLLMProvider`：可选接入 LiteLLM，通过 model identifier 路由 OpenAI、Anthropic、Gemini、DeepSeek 等 API。
+开放式质量判断交给任务级二元 rubric。每项标准独立返回通过、失败或未知，确定判定需要引用输出、参考材料、trace 或产物中的证据。未知不会被解释为通过：缺少 judge、证据不足或 judge 连续返回无效结构，都需要保留不确定性。默认词汇重合指标只作诊断，不能声称已经验证语义正确或事实支撑。
 
-## 四类评分目标
+这是一项刻意的取舍。规则可以便宜、稳定地验证有限约定，却不能用来冒充通用语义理解；模型 judge 可以处理开放问题，但合法 JSON 和存在的证据引用也不保证判断正确。因此评测器还提供标注对齐分析，保留未知覆盖率、分歧和误放行案例，支持先统一人工标准，再校准机器判断。
 
-| 类别 | 示例 |
-| --- | --- |
-| Outcome | 任务是否完成、必需 artifact 是否存在 |
-| Process | tool 是否选择正确、关键事件是否按顺序发生、是否出现失败事件 |
-| Quality | 输出是否相关、是否有 artifact/observation 支撑 |
-| Efficiency | tool call 是否反复、token usage 是否超出预算 |
+## 先确认可比，再决定是否接受
 
-每个 check 都包含 `id/category/pass/score/notes/source`。`evals/rubric_result.schema.json` 给出机器可读的 JSON Schema，可供 CI 稳定解析，而不是依赖自由文本结论。Outcome、trace integrity、required artifacts 和核心 quality checks 默认属于 must-pass 条件，不能被其他高分抵消。
+比较双方必须共享任务内容、结果约定、rubric、judge 配置和环境标识。报告保存这些条件及其指纹，被评测版本另行记录。相同 `case_id` 只是必要条件；如果参考答案或判分标准改变，就需要重新评测两边。
 
-## 为什么 deterministic 与 rubric 要同时存在
+门禁先检查候选方案的所有硬性条件，再检查总分与指定指标的退化限额。失败或未知的硬性检查都不能被更低的 token 消耗抵消。空数据、重复样本、缺失运行和写错的指标名会被拒绝，而不是返回看似正常的通过结果。
 
-适合代码直接判断的问题，例如是否执行成功、是否产生 SQL、tool 调用次数和 trace 顺序，应优先使用 deterministic checks：结果稳定、便宜、容易 debug。
+总分用来定位和排序，不是统计显著性的证明。重复试验摘要保留每个任务的成功次数、全部成功与偶尔成功、分数范围；它不把一次命中解释为稳定能力，也不从少量合成样本推断业务收益。
 
-回答是否真正理解业务语义、是否有充分 grounding 等开放性问题，再交给 rubric-based judge。LLM judge 不能替代硬性检查，而是补充普通断言难以覆盖的 semantic assertion。
+## 执行可靠性也是评测条件
 
-## 量化改进
+模型网关记录每次尝试、延迟、可见 token 和可估算费用。等待超时后，原请求可能仍在执行，因此网关限制未结束调用数量，真实适配器同时设置请求超时。缺失 usage、价格或失败请求账单时，费用会明确标记为不完整。
 
-报告不只包含一个 aggregate score，还会保留 `trace_order`、`trace_sequence`、`required_artifacts`、`tool_efficiency`、`output_relevance` 等分项指标。对 baseline 与 candidate 运行相同 eval cases 后，regression report 会输出每项 delta，因此可以回答“提升发生在哪一步”，也可以在 CI 中配置不可退化门禁。
+被评测 Agent 可以试验 provider 回退；judge 的模型传输固定单一 provider，避免中途换裁判。网关保留简单、有限次数的重试策略，适用于小规模实验；它没有实现分布式调度、强制终止任意网络调用或真实执行沙箱。
 
-多 API workflow 不与某一家 SDK 耦合：
+## 如何验证这个设计
 
-```python
-gateway = ResilientModelGateway([primary_provider, fallback_provider])
-result = gateway.complete(prompt, model="provider/model-name")
-```
+合成种子集覆盖正常行为、选错工具、禁止调用、最终状态错误、输出否定、缺失 usage、损坏 trace 和缺少语义证据。它验证的是评测约定及失败语义，不是模型排行榜。实际接入后，应把可公开的失败案例不断沉淀成固定回归用例，同时保留独立样本校准 judge，避免只对已经看过的案例有效。
 
-gateway 不把不同 provider 的 SDK response 暴露给上层；provider 可以返回纯文本或带 usage 的 `ProviderResponse`。成本按照外部传入的 model pricing 配置计算，避免在代码中固化可能变化的价格。
+- [使用与复现](docs/usage.md)：安装、示例、接入捕获记录及真实 judge。
+- [评测协议与设计取舍](docs/design.md)：未知语义、证据、比较条件、门禁和运行边界。
+- [合成用例](evals/synthetic_behavior_cases.json)：可检查的 Good / Bad / Unknown 案例。
 
-安装 `llm-eval-lab[providers]` 后可使用 `LiteLLMProvider`。默认 tests 使用 synthetic providers，不调用外部 API，也不需要任何密钥。
-
-## Clean-room 声明
-
-这是基于通用 LLM evaluation 工程问题抽象出的 clean-room reference implementation，不包含任何前公司 proprietary code、真实内部数据、真实表名、真实 URL、内部 Prompt 或内部架构资产。示例内容均为 synthetic data。
-
-## 运行
-
-```bash
-python -m pip install -e ".[dev]"
-python examples/demo.py
-python examples/trace_eval_demo.py
-python examples/multi_provider_demo.py
-pytest -q
-```
-
-`examples/demo.py` 展示 final-output rubric 与 baseline/candidate diff；`examples/trace_eval_demo.py` 展示 captured Agent run 的结构化过程评分。
-
-第一版优先保证可解释、可重复和易替换。baseline 与 candidate 必须使用相同 `case_id` 集合，缺失 captured run 会被显式拒绝，避免用不同数据集制造虚假提升。接入真实 judge model 时，建议保留 deterministic checks 作为硬约束，再把开放式质量判断交给 `LLMAsJudge` 或 `RunRubricJudge`。
+设计参考 [OpenAI 的 Skill 评测实践](https://developers.openai.com/blog/eval-skills) 中从成功条件、捕获运行到逐项检查的路径，以及 [美团的 Agent 评测方法论](https://tech.meituan.com/2026/08/07/Agent-Evaluation.html) 中任务行为评测、二元 rubric 和人工与机器对齐的思路。本项目据此实现一个小而可检验的评测闭环，没有复现两篇文章涉及的企业系统。

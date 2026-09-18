@@ -21,15 +21,17 @@ class SyntheticFallback:
 
 
 def main() -> None:
-    gateway = ResilientModelGateway(
+    with ResilientModelGateway(
         [SyntheticPrimary(), SyntheticFallback()],
         retries_per_provider=1,
         backoff_seconds=0,
         pricing_per_million_tokens={"synthetic/model": (1.0, 2.0)},
-    )
-    result = gateway.complete("synthetic prompt", "synthetic/model")
+    ) as gateway:
+        result = gateway.complete("synthetic prompt", "synthetic/model")
     print(f"provider={result.provider}, attempts={result.attempts}")
-    print(f"usage={result.usage}, cost_usd={result.estimated_cost_usd:.6f}")
+    print(
+        f"usage={result.usage}, known_cost_usd={result.estimated_cost_usd:.6f}, cost_complete={result.cost_complete}"
+    )
     for attempt in result.attempt_trace:
         print(attempt)
 

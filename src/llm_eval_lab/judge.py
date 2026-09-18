@@ -24,16 +24,24 @@ class JudgeOutputError(ValueError):
 class HeuristicJudge:
     """可重复的 deterministic judge，作为 LLM-as-a-Judge 的 baseline。"""
 
-    def evaluate(self, case: EvalCase, response: str, rubric: Rubric) -> tuple[JudgeScore, ...]:
-        coverage = token_coverage(response, case.reference)
-        return (
-            JudgeScore("relevance", coverage, f"reference token coverage={coverage:.3f}"),
+    def evaluate(
+        self, case: EvalCase, response: str, rubric: Rubric
+    ) -> tuple[JudgeScore, ...]:
+        values = {
+            "reference_overlap": token_coverage(response, case.reference),
+            "nonempty_output": float(bool(response.strip())),
+        }
+        if any(c.name not in values for c in rubric.criteria):
+            raise ValueError(
+                "HeuristicJudge supports lexical diagnostics only; configure LLMAsJudge for semantic criteria"
+            )
+        return tuple(
             JudgeScore(
-                "groundedness",
-                min(1.0, coverage + 0.1) if coverage else 0.0,
-                "使用 reference token overlap 作为保守 proxy",
-            ),
-            JudgeScore("format", 1.0 if response.strip() else 0.0, "非空回答检查"),
+                c.name,
+                values[c.name],
+                "Diagnostic only; does not establish semantic correctness.",
+            )
+            for c in rubric.criteria
         )
 
 
@@ -41,10 +49,14 @@ class LLMAsJudge:
     """LLM judge adapter；外部 client 只需返回 criterion -> score/reason。"""
 
     def __init__(self, client: JudgeClient, max_retries: int = 1) -> None:
+        if type(max_retries) is not int or max_retries < 0:
+            raise ValueError("max_retries must be nonnegative")
         self.client = client
         self.max_retries = max_retries
 
-    def evaluate(self, case: EvalCase, response: str, rubric: Rubric) -> tuple[JudgeScore, ...]:
+    def evaluate(
+        self, case: EvalCase, response: str, rubric: Rubric
+    ) -> tuple[JudgeScore, ...]:
         last_error: JudgeOutputError | None = None
         payload: dict[str, Any] = {}
         validation_errors: tuple[str, ...] = ()

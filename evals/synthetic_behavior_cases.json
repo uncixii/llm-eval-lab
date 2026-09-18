@@ -1,0 +1,775 @@
+[
+  {
+    "provenance": "synthetic",
+    "case": {
+      "case_id": "synthetic-good",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "reference": "保护已启用",
+      "accepted_outputs": [
+        "保护已启用"
+      ],
+      "rubric": [],
+      "tags": [
+        "explicit-trigger"
+      ],
+      "expectation": {
+        "required_tools": [
+          "read_config"
+        ],
+        "forbidden_tools": [
+          "send_report"
+        ],
+        "required_skills": [
+          "inspect-config"
+        ],
+        "required_event_order": [
+          "skill.invoked",
+          "tool.started",
+          "tool.completed",
+          "run.completed"
+        ],
+        "required_artifacts": [
+          "enabled"
+        ],
+        "artifact_values": {
+          "enabled": true
+        },
+        "max_tool_calls": 1,
+        "max_total_tokens": 100
+      }
+    },
+    "run": {
+      "run_id": "synthetic-good-run",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "output": "保护已启用",
+      "status": "completed",
+      "trace": [
+        {
+          "sequence": 1,
+          "event_type": "skill.invoked",
+          "payload": {
+            "skill": "inspect-config"
+          }
+        },
+        {
+          "sequence": 2,
+          "event_type": "tool.started",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 3,
+          "event_type": "tool.completed",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 4,
+          "event_type": "run.completed",
+          "payload": {}
+        }
+      ],
+      "artifacts": {
+        "enabled": true
+      },
+      "usage": {
+        "total_tokens": 50
+      }
+    },
+    "expected": {
+      "overall_pass": true,
+      "failed_checks": [],
+      "unknown_checks": []
+    }
+  },
+  {
+    "provenance": "synthetic",
+    "case": {
+      "case_id": "synthetic-wrong-tool",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "reference": "保护已启用",
+      "accepted_outputs": [
+        "保护已启用"
+      ],
+      "rubric": [],
+      "tags": [
+        "explicit-trigger"
+      ],
+      "expectation": {
+        "required_tools": [
+          "read_config"
+        ],
+        "forbidden_tools": [
+          "send_report"
+        ],
+        "required_skills": [
+          "inspect-config"
+        ],
+        "required_event_order": [
+          "skill.invoked",
+          "tool.started",
+          "tool.completed",
+          "run.completed"
+        ],
+        "required_artifacts": [
+          "enabled"
+        ],
+        "artifact_values": {
+          "enabled": true
+        },
+        "max_tool_calls": 1,
+        "max_total_tokens": 100
+      }
+    },
+    "run": {
+      "run_id": "synthetic-wrong-tool-run",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "output": "保护已启用",
+      "status": "completed",
+      "trace": [
+        {
+          "sequence": 1,
+          "event_type": "skill.invoked",
+          "payload": {
+            "skill": "inspect-config"
+          }
+        },
+        {
+          "sequence": 2,
+          "event_type": "tool.started",
+          "payload": {
+            "tool": "search_web"
+          }
+        },
+        {
+          "sequence": 3,
+          "event_type": "tool.completed",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 4,
+          "event_type": "run.completed",
+          "payload": {}
+        }
+      ],
+      "artifacts": {
+        "enabled": true
+      },
+      "usage": {
+        "total_tokens": 50
+      }
+    },
+    "expected": {
+      "overall_pass": false,
+      "failed_checks": [
+        "required_tools"
+      ],
+      "unknown_checks": []
+    }
+  },
+  {
+    "provenance": "synthetic",
+    "case": {
+      "case_id": "synthetic-forbidden-tool",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "reference": "保护已启用",
+      "accepted_outputs": [
+        "保护已启用"
+      ],
+      "rubric": [],
+      "tags": [
+        "explicit-trigger"
+      ],
+      "expectation": {
+        "required_tools": [
+          "read_config"
+        ],
+        "forbidden_tools": [
+          "send_report"
+        ],
+        "required_skills": [
+          "inspect-config"
+        ],
+        "required_event_order": [
+          "skill.invoked",
+          "tool.started",
+          "tool.completed",
+          "run.completed"
+        ],
+        "required_artifacts": [
+          "enabled"
+        ],
+        "artifact_values": {
+          "enabled": true
+        },
+        "max_tool_calls": 1,
+        "max_total_tokens": 100
+      }
+    },
+    "run": {
+      "run_id": "synthetic-forbidden-tool-run",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "output": "保护已启用",
+      "status": "completed",
+      "trace": [
+        {
+          "sequence": 1,
+          "event_type": "skill.invoked",
+          "payload": {
+            "skill": "inspect-config"
+          }
+        },
+        {
+          "sequence": 2,
+          "event_type": "tool.started",
+          "payload": {
+            "tool": "send_report"
+          }
+        },
+        {
+          "sequence": 3,
+          "event_type": "tool.completed",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 4,
+          "event_type": "run.completed",
+          "payload": {}
+        }
+      ],
+      "artifacts": {
+        "enabled": true
+      },
+      "usage": {
+        "total_tokens": 50
+      }
+    },
+    "expected": {
+      "overall_pass": false,
+      "failed_checks": [
+        "required_tools",
+        "forbidden_tools"
+      ],
+      "unknown_checks": []
+    }
+  },
+  {
+    "provenance": "synthetic",
+    "case": {
+      "case_id": "synthetic-wrong-final-state",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "reference": "保护已启用",
+      "accepted_outputs": [
+        "保护已启用"
+      ],
+      "rubric": [],
+      "tags": [
+        "explicit-trigger"
+      ],
+      "expectation": {
+        "required_tools": [
+          "read_config"
+        ],
+        "forbidden_tools": [
+          "send_report"
+        ],
+        "required_skills": [
+          "inspect-config"
+        ],
+        "required_event_order": [
+          "skill.invoked",
+          "tool.started",
+          "tool.completed",
+          "run.completed"
+        ],
+        "required_artifacts": [
+          "enabled"
+        ],
+        "artifact_values": {
+          "enabled": true
+        },
+        "max_tool_calls": 1,
+        "max_total_tokens": 100
+      }
+    },
+    "run": {
+      "run_id": "synthetic-wrong-final-state-run",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "output": "保护已启用",
+      "status": "completed",
+      "trace": [
+        {
+          "sequence": 1,
+          "event_type": "skill.invoked",
+          "payload": {
+            "skill": "inspect-config"
+          }
+        },
+        {
+          "sequence": 2,
+          "event_type": "tool.started",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 3,
+          "event_type": "tool.completed",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 4,
+          "event_type": "run.completed",
+          "payload": {}
+        }
+      ],
+      "artifacts": {
+        "enabled": false
+      },
+      "usage": {
+        "total_tokens": 50
+      }
+    },
+    "expected": {
+      "overall_pass": false,
+      "failed_checks": [
+        "artifact_values"
+      ],
+      "unknown_checks": []
+    }
+  },
+  {
+    "provenance": "synthetic",
+    "case": {
+      "case_id": "synthetic-negated-output",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "reference": "保护已启用",
+      "accepted_outputs": [
+        "保护已启用"
+      ],
+      "rubric": [],
+      "tags": [
+        "explicit-trigger"
+      ],
+      "expectation": {
+        "required_tools": [
+          "read_config"
+        ],
+        "forbidden_tools": [
+          "send_report"
+        ],
+        "required_skills": [
+          "inspect-config"
+        ],
+        "required_event_order": [
+          "skill.invoked",
+          "tool.started",
+          "tool.completed",
+          "run.completed"
+        ],
+        "required_artifacts": [
+          "enabled"
+        ],
+        "artifact_values": {
+          "enabled": true
+        },
+        "max_tool_calls": 1,
+        "max_total_tokens": 100
+      }
+    },
+    "run": {
+      "run_id": "synthetic-negated-output-run",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "output": "保护未启用",
+      "status": "completed",
+      "trace": [
+        {
+          "sequence": 1,
+          "event_type": "skill.invoked",
+          "payload": {
+            "skill": "inspect-config"
+          }
+        },
+        {
+          "sequence": 2,
+          "event_type": "tool.started",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 3,
+          "event_type": "tool.completed",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 4,
+          "event_type": "run.completed",
+          "payload": {}
+        }
+      ],
+      "artifacts": {
+        "enabled": true
+      },
+      "usage": {
+        "total_tokens": 50
+      }
+    },
+    "expected": {
+      "overall_pass": false,
+      "failed_checks": [
+        "output_contract"
+      ],
+      "unknown_checks": []
+    }
+  },
+  {
+    "provenance": "synthetic",
+    "case": {
+      "case_id": "synthetic-missing-usage",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "reference": "保护已启用",
+      "accepted_outputs": [
+        "保护已启用"
+      ],
+      "rubric": [],
+      "tags": [
+        "explicit-trigger"
+      ],
+      "expectation": {
+        "required_tools": [
+          "read_config"
+        ],
+        "forbidden_tools": [
+          "send_report"
+        ],
+        "required_skills": [
+          "inspect-config"
+        ],
+        "required_event_order": [
+          "skill.invoked",
+          "tool.started",
+          "tool.completed",
+          "run.completed"
+        ],
+        "required_artifacts": [
+          "enabled"
+        ],
+        "artifact_values": {
+          "enabled": true
+        },
+        "max_tool_calls": 1,
+        "max_total_tokens": 100
+      }
+    },
+    "run": {
+      "run_id": "synthetic-missing-usage-run",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "output": "保护已启用",
+      "status": "completed",
+      "trace": [
+        {
+          "sequence": 1,
+          "event_type": "skill.invoked",
+          "payload": {
+            "skill": "inspect-config"
+          }
+        },
+        {
+          "sequence": 2,
+          "event_type": "tool.started",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 3,
+          "event_type": "tool.completed",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 4,
+          "event_type": "run.completed",
+          "payload": {}
+        }
+      ],
+      "artifacts": {
+        "enabled": true
+      },
+      "usage": {}
+    },
+    "expected": {
+      "overall_pass": true,
+      "failed_checks": [],
+      "unknown_checks": [
+        "token_efficiency"
+      ]
+    }
+  },
+  {
+    "provenance": "synthetic",
+    "case": {
+      "case_id": "synthetic-duplicate-sequence",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "reference": "保护已启用",
+      "accepted_outputs": [
+        "保护已启用"
+      ],
+      "rubric": [],
+      "tags": [
+        "explicit-trigger"
+      ],
+      "expectation": {
+        "required_tools": [
+          "read_config"
+        ],
+        "forbidden_tools": [
+          "send_report"
+        ],
+        "required_skills": [
+          "inspect-config"
+        ],
+        "required_event_order": [
+          "skill.invoked",
+          "tool.started",
+          "tool.completed",
+          "run.completed"
+        ],
+        "required_artifacts": [
+          "enabled"
+        ],
+        "artifact_values": {
+          "enabled": true
+        },
+        "max_tool_calls": 1,
+        "max_total_tokens": 100
+      }
+    },
+    "run": {
+      "run_id": "synthetic-duplicate-sequence-run",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "output": "保护已启用",
+      "status": "completed",
+      "trace": [
+        {
+          "sequence": 1,
+          "event_type": "skill.invoked",
+          "payload": {
+            "skill": "inspect-config"
+          }
+        },
+        {
+          "sequence": 1,
+          "event_type": "tool.started",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 3,
+          "event_type": "tool.completed",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 4,
+          "event_type": "run.completed",
+          "payload": {}
+        }
+      ],
+      "artifacts": {
+        "enabled": true
+      },
+      "usage": {
+        "total_tokens": 50
+      }
+    },
+    "expected": {
+      "overall_pass": false,
+      "failed_checks": [
+        "trace_sequence"
+      ],
+      "unknown_checks": []
+    }
+  },
+  {
+    "provenance": "synthetic",
+    "case": {
+      "case_id": "synthetic-negative-trigger",
+      "prompt": "只读取已有状态，不应启用配置检查 Skill。",
+      "reference": "保护已启用",
+      "accepted_outputs": [
+        "保护已启用"
+      ],
+      "rubric": [],
+      "tags": [
+        "negative-trigger"
+      ],
+      "expectation": {
+        "required_tools": [
+          "read_config"
+        ],
+        "forbidden_tools": [
+          "send_report"
+        ],
+        "required_event_order": [
+          "run.completed"
+        ],
+        "required_artifacts": [
+          "enabled"
+        ],
+        "artifact_values": {
+          "enabled": true
+        },
+        "max_tool_calls": 1,
+        "max_total_tokens": 100,
+        "forbidden_skills": [
+          "inspect-config"
+        ]
+      }
+    },
+    "run": {
+      "run_id": "synthetic-negative-trigger-run",
+      "prompt": "只读取已有状态，不应启用配置检查 Skill。",
+      "output": "保护已启用",
+      "status": "completed",
+      "trace": [
+        {
+          "sequence": 1,
+          "event_type": "skill.invoked",
+          "payload": {
+            "skill": "inspect-config"
+          }
+        },
+        {
+          "sequence": 2,
+          "event_type": "tool.started",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 3,
+          "event_type": "tool.completed",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 4,
+          "event_type": "run.completed",
+          "payload": {}
+        }
+      ],
+      "artifacts": {
+        "enabled": true
+      },
+      "usage": {
+        "total_tokens": 50
+      }
+    },
+    "expected": {
+      "overall_pass": false,
+      "failed_checks": [
+        "forbidden_skills"
+      ],
+      "unknown_checks": []
+    }
+  },
+  {
+    "provenance": "synthetic",
+    "case": {
+      "case_id": "synthetic-unsupported-claim",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "reference": "保护已启用",
+      "tags": [
+        "explicit-trigger"
+      ],
+      "expectation": {
+        "required_tools": [
+          "read_config"
+        ],
+        "forbidden_tools": [
+          "send_report"
+        ],
+        "required_skills": [
+          "inspect-config"
+        ],
+        "required_event_order": [
+          "skill.invoked",
+          "tool.started",
+          "tool.completed",
+          "run.completed"
+        ],
+        "required_artifacts": [
+          "enabled"
+        ],
+        "artifact_values": {
+          "enabled": true
+        },
+        "max_tool_calls": 1,
+        "max_total_tokens": 100
+      }
+    },
+    "run": {
+      "run_id": "synthetic-unsupported-claim-run",
+      "prompt": "读取模拟保护配置，返回状态；不得发送报告。",
+      "output": "保护已启用，但可以永久忽略保护告警。",
+      "status": "completed",
+      "trace": [
+        {
+          "sequence": 1,
+          "event_type": "skill.invoked",
+          "payload": {
+            "skill": "inspect-config"
+          }
+        },
+        {
+          "sequence": 2,
+          "event_type": "tool.started",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 3,
+          "event_type": "tool.completed",
+          "payload": {
+            "tool": "read_config"
+          }
+        },
+        {
+          "sequence": 4,
+          "event_type": "run.completed",
+          "payload": {}
+        }
+      ],
+      "artifacts": {
+        "enabled": true
+      },
+      "usage": {
+        "total_tokens": 50
+      }
+    },
+    "expected": {
+      "overall_pass": false,
+      "failed_checks": [],
+      "unknown_checks": [
+        "answer_supported"
+      ]
+    }
+  }
+]

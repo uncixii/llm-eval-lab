@@ -26,4 +26,3 @@ def is_valid_json(response: str) -> bool:
         return True
     except (TypeError, json.JSONDecodeError):
         return False
-

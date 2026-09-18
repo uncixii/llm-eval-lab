@@ -1,9 +1,29 @@
 """llm-eval-lab 的公开接口。"""
 
+from .calibration import Label, compare_labels
 from .judge import HeuristicJudge, JudgeOutputError, LLMAsJudge
-from .models import EvalCase, EvalReport, Rubric, RubricCriterion
+from .models import (
+    AgentEvalCase,
+    BinaryCriterion,
+    CapturedRun,
+    EvalCase,
+    EvalReport,
+    EvaluationContext,
+    Rubric,
+    RubricCriterion,
+    TraceEvent,
+    TraceExpectation,
+)
+from .providers import (
+    AttemptRecord,
+    CompletionResult,
+    GatewayError,
+    LiteLLMProvider,
+    ProviderResponse,
+    ResilientModelGateway,
+)
 from .regression import compare_reports, evaluate_dataset
-from .models import AgentEvalCase, CapturedRun, TraceEvent, TraceExpectation
+from .semantic import GatewayJudgeClient, StructuredRunJudge
 from .trace_eval import (
     compare_agent_eval_reports,
     evaluate_agent_runs,
@@ -11,13 +31,7 @@ from .trace_eval import (
     parse_trace_jsonl,
     result_as_structured_json,
 )
-from .providers import (
-    AttemptRecord,
-    CompletionResult,
-    LiteLLMProvider,
-    ProviderResponse,
-    ResilientModelGateway,
-)
+from .trials import summarize_trials
 
 __all__ = [
     "AttemptRecord",
@@ -29,6 +43,7 @@ __all__ = [
     "JudgeOutputError",
     "LLMAsJudge",
     "CompletionResult",
+    "GatewayError",
     "LiteLLMProvider",
     "ProviderResponse",
     "ResilientModelGateway",
@@ -43,4 +58,14 @@ __all__ = [
     "evaluate_captured_run",
     "parse_trace_jsonl",
     "result_as_structured_json",
+]
+
+__all__ += [
+    "BinaryCriterion",
+    "EvaluationContext",
+    "StructuredRunJudge",
+    "GatewayJudgeClient",
+    "Label",
+    "compare_labels",
+    "summarize_trials",
 ]

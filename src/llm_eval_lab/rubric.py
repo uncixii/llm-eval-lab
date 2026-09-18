@@ -4,12 +4,15 @@ from .models import Rubric, RubricCriterion
 
 
 def default_rubric() -> Rubric:
+    """Cheap diagnostics, deliberately not labelled relevance or groundedness."""
     return Rubric(
-        name="qa_quality",
-        criteria=(
-            RubricCriterion("relevance", "回答是否直接覆盖问题和 reference 的核心信息", 0.4),
-            RubricCriterion("groundedness", "回答是否只使用给定 reference 能支持的信息", 0.4),
-            RubricCriterion("format", "回答是否满足结构或引用要求", 0.2),
+        "lexical_diagnostics",
+        (
+            RubricCriterion(
+                "reference_overlap",
+                "Reference token coverage; not semantic correctness",
+                0.8,
+            ),
+            RubricCriterion("nonempty_output", "Output is nonempty", 0.2),
         ),
     )
-

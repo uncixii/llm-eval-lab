@@ -22,3 +22,4 @@ jobs:
       - run: python examples/demo.py
       - run: python examples/trace_eval_demo.py
       - run: python examples/multi_provider_demo.py
+      - run: python examples/behavior_eval_demo.py

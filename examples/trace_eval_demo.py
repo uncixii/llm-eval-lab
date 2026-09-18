@@ -29,11 +29,21 @@ def main() -> None:
         run.prompt,
         reference="delivery_cycle 平均交付天数",
         expectation=TraceExpectation(
-            required_event_order=("run.started", "semantic_model.selected", "tool.started", "tool.completed", "run.completed"),
+            required_event_order=(
+                "run.started",
+                "semantic_model.selected",
+                "tool.started",
+                "tool.completed",
+                "run.completed",
+            ),
             required_artifacts=("semantic_model", "generated_sql"),
             max_tool_calls=1,
             max_total_tokens=500,
         ),
+        accepted_outputs=(
+            "匹配 delivery_cycle，并基于查询结果返回平均交付天数。",
+        ),  # synthetic exact-contract illustration, not semantic scoring
+        rubric=(),
     )
     print(result_as_structured_json(evaluate_captured_run(run, case)))
 
